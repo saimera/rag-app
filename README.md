@@ -35,7 +35,7 @@ flowchart LR
 
 ## Stack
 
-FastAPI 
+· FastAPI 
 · PostgreSQL 
 · SQLAlchemy 
 · Alembic 
