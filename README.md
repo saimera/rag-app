@@ -35,7 +35,15 @@ flowchart LR
 
 ## Stack
 
-FastAPI · PostgreSQL · SQLAlchemy · Alembic · ChromaDB · LangChain (loading and chunking) · Jina embeddings v5 · Groq (`openai/gpt-oss-20b`) · plain HTML frontend
+FastAPI 
+· PostgreSQL 
+· SQLAlchemy 
+· Alembic 
+· ChromaDB 
+· LangChain (loading and chunking) 
+· Jina embeddings v5 
+· Groq (`openai/gpt-oss-20b`) 
+· plain HTML frontend
 
 ## Run locally
 
