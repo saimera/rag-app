@@ -1,23 +1,23 @@
-# sourcely
+# Sourcely
 
-A RAG chatbot that answers questions from PDF documents and cites its sources down to the page. Every answer links back to the exact page it came from.
+Sourcely is a retrieval-augmented generation (RAG) application for asking questions about PDF documents. It retrieves relevant passages, generates answers grounded in those passages, and returns page-level source references.
 
-Sample corpus:
-[Claude Opus 5.5 System Card]
-Link: (https://www-cdn.anthropic.com/fc1b44717c85dc068bc6ba5024219938094694bd/Claude%20Opus%205.5%20System%20Card.pdf)
-(230 pages, 575 chunks).
+## Capabilities
 
-## What makes it more than a demo
+- **Page-level citations:** Answers can cite retrieved passages using numbered references. The API returns references with document titles, page numbers, and PDF links that open at the cited page.
+- **Relational and vector storage:** PostgreSQL stores document and chunk records; ChromaDB stores embeddings and retrieval metadata. A shared chunk UUID links vector search results to their source records.
+- **Separate ingestion stages:** PDF loading and chunk persistence are handled by `chunking.py`; embedding generation and vector upserts are handled by `vectorize.py`.
+- **Grounded generation:** The prompt instructs the language model to answer from retrieved source text and to say when the sources do not contain the answer.
+- **Database migrations:** Alembic manages PostgreSQL schema changes.
+- **Provider integrations:** Jina generates embeddings, while Groq provides the chat completion used to generate answers.
 
-- **Page-level citations.** The model cites sources as `[1]`, `[2]`. Only the sources it actually cited are returned, each as a link that opens the PDF at that page (`#page=N`).
-- **Two stores, one ID.** Postgres is the source of truth for text and metadata. ChromaDB holds only vectors. Both share the same chunk UUID, so retrieval is a vector lookup followed by a Postgres fetch.
-- **Separate ingestion pipeline.** Load, chunk and vectorize are independent scripts. Each chunk carries a `status` (`ready_to_vectorize` → `vectorized`), so a failed run resumes where it stopped, and re-runs are safe because vectors are upserted.
-- **Asymmetric retrieval.** Questions and passages are embedded with different Jina tasks (`retrieval.query` and `retrieval.passage`), searched by cosine distance.
-- **Grounded answers.** The prompt restricts the model to the retrieved sources and tells it to say so when the answer isn't there.
-- **Schema migrations.** Tables are managed with Alembic, not created ad hoc.
-- **Config out of code.** Secrets live in environment variables, and the LLM sits behind a single `generate()` function, so swapping providers touches one file.
+## Sample document
 
-## How it works
+The default ingestion configuration targets the [Claude Opus 5.5 System Card](https://www-cdn.anthropic.com/fc1b44717c85dc068bc6ba5024219938094694bd/Claude%20Opus%205.5%20System%20Card.pdf), which is also included in the repository.
+
+## Architecture
+
+### Ingestion and query flows
 
 ```mermaid
 flowchart LR
@@ -33,54 +33,129 @@ flowchart LR
     end
 ```
 
-## Stack
+### Technology stack
 
-· FastAPI 
-· PostgreSQL 
-· SQLAlchemy 
-· Alembic 
-· ChromaDB 
-· LangChain (loading and chunking) 
-· Jina embeddings v5 
-· Groq (`openai/gpt-oss-20b`) 
-· plain HTML frontend
+- **API:** FastAPI and Uvicorn
+- **Relational database and ORM:** PostgreSQL and SQLAlchemy
+- **Schema migrations:** Alembic
+- **Vector database:** ChromaDB with cosine-distance search
+- **PDF processing:** PyMuPDF through LangChain's PDF loader; LangChain text splitters
+- **Embeddings:** Jina `jina-embeddings-v5-text-nano`
+- **Answer generation:** Groq using `openai/gpt-oss-20b`
+- **Web interface:** HTML and JavaScript served by the FastAPI application
 
-## Run locally
+## Retrieval defaults
 
-Requires Python 3.12, [uv](https://docs.astral.sh/uv/) and a running PostgreSQL.
+- The text splitter uses a 1,000-character chunk size with 200 characters of overlap.
+- Each query retrieves up to five nearest chunks from ChromaDB.
+- ChromaDB uses cosine distance to rank vector results.
+
+## Requirements
+
+- Python 3.14 or newer
+- [uv](https://docs.astral.sh/uv/)
+- A running PostgreSQL server and a database for the application
+- Jina and Groq API keys
+
+## Local setup
+
+Run these commands from the repository root:
 
 ```bash
 uv sync
-cp src/model_rag/.env.example .env      # then fill in your values
-uv run alembic upgrade head             # create tables
+cp src/model_rag/.env.example .env
+```
 
-# ingest a PDF (set PDF_PATH, TITLE and SOURCE_URL in scripts/chunking.py first)
+Edit `.env` and provide your database URL and API keys:
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:5432/model_rag
+JINA_API_KEY=your_jina_key
+GROQ_API_KEY=your_groq_key
+```
+
+Create the PostgreSQL database if it does not already exist, then apply the migrations:
+
+```bash
+uv run alembic upgrade head
+```
+
+## Ingest a PDF
+
+The current ingestion script uses `PDF_PATH`, `TITLE`, and `SOURCE_URL` constants in `src/model_rag/scripts/chunking.py`. Set these values for the PDF you want to ingest. The PDF path is resolved relative to the directory from which the script is run.
+
+Run the ingestion stages from the repository root:
+
+```bash
 uv run python -m model_rag.scripts.chunking
 uv run python -m model_rag.scripts.vectorize
+```
 
+The chunking stage stores the document and its page-aware text chunks in PostgreSQL with a `ready_to_vectorize` status. The vectorization stage processes eligible chunks in batches, upserts their embeddings into the persistent local ChromaDB collection, and marks successfully processed chunks as `vectorized`.
+
+## Run the application
+
+```bash
 uv run uvicorn model_rag.main:app --reload
 ```
 
-Open http://127.0.0.1:8000 and ask a question.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000) to use the web interface. Interactive API documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
 ## API
 
-`POST /ask` with `{"query": "..."}` returns:
+### `POST /ask`
+
+Request:
 
 ```json
 {
-  "answer": "… published on September 22, 2026 [1].",
+  "query": "When was the system card published?"
+}
+```
+
+Response:
+
+```json
+{
+  "answer": "The system card was published on September 22, 2026 [1].",
   "references": [
-    {"number": 1, "title": "Claude Opus 5.5 System Card", "page_no": 1, "url": "…pdf#page=1"}
+    {
+      "number": 1,
+      "title": "Claude Opus 5.5 System Card",
+      "page_no": 1,
+      "url": "https://example.com/document.pdf#page=1"
+    }
   ]
 }
 ```
 
+The `references` array contains the sources cited in the generated answer. Each reference includes its citation number, document title, page number, and page-specific URL.
+
+## Project structure
+
+```text
+src/model_rag/
+├── api/                 # FastAPI endpoints
+├── db/                  # PostgreSQL models, sessions, and ChromaDB client
+├── scripts/             # PDF chunking and vectorization workflows
+├── services/            # Retrieval, embeddings, and LLM integrations
+└── templates/           # Web interface
+migrations/              # Alembic migration revisions
+```
+
+## Current implementation notes
+
+- ChromaDB persists locally in the repository's `chroma_db/` directory.
+- Chunking creates a new document record and new chunk IDs each time it runs. Vector upserts are idempotent for an existing chunk ID, but rerunning the chunking stage is not a deduplication mechanism.
+- The embedding service currently sends `retrieval.query` as the Jina task for both query and passage embedding requests.
+- The ingestion script is configured for one PDF at a time through constants in `chunking.py`.
+- The application does not currently include authentication, document-level authorization, or a retrieval/answer evaluation suite. Deployments beyond local development should add and validate the operational and security controls appropriate to their environment.
+
 ## Roadmap
 
-1 - Auth (JWT) and document-level access control
-2 - Evaluation set for retrieval and answer quality
-3 - Request logging: query, retrieved chunk IDs, latency
-4 - Docker Compose for Postgres, Chroma and the API
-5 - Hybrid search and reranking
-6 - Multi-document ingestion
+1. Add authentication and document-level access control.
+2. Establish an evaluation set for retrieval relevance and answer quality.
+3. Add request logging for queries, retrieved chunk IDs, and latency.
+4. Provide a containerized local deployment for PostgreSQL, ChromaDB, and the API.
+5. Evaluate hybrid search and reranking.
+6. Support multi-document ingestion.

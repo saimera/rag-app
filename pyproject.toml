@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
-    { name = "Saim Maqsood", email = "saim.maqsood@legisys.ai" }
+    { name = "Saim Maqsood", email = "max.saim21@gmail.com" }
 ]
 requires-python = ">=3.14"
 dependencies = [
